@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>業務ログ管理</title>
+
+  <!-- PWA・ホーム画面アプリアイコン設定 -->
+  <meta name="apple-mobile-web-app-title" content="業務ログ">
+  <meta name="application-name" content="業務ログ">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/2966/2966327.png">
+
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 14px; background: #eceff1; margin: 0; color: #263238; }
+    .card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.06); max-width: 440px; margin: auto; }
+    h2 { font-size: 1.15rem; margin-top: 0; color: #1565c0; border-bottom: 2px solid #e3f2fd; padding-bottom: 8px; }
+    .form-group { margin-bottom: 16px; }
+    label { display: block; font-weight: bold; margin-bottom: 6px; font-size: 0.88rem; color: #37474f; }
+    input[type="date"], select, input[type="number"], textarea { width: 100%; padding: 12px; border: 1px solid #cfd8dc; border-radius: 8px; box-sizing: border-box; font-size: 1rem; background: #fafafa; }
+    .checkbox-group label { display: flex; align-items: flex-start; font-weight: normal; margin-bottom: 8px; background: #f8f9fa; padding: 10px; border-radius: 6px; font-size: 0.85rem; border: 1px solid #eceff1; }
+    .checkbox-group input { margin-right: 10px; margin-top: 3px; transform: scale(1.2); }
+    button { width: 100%; padding: 14px; background: #1565c0; color: white; border: none; border-radius: 8px; font-size: 1.05rem; font-weight: bold; cursor: pointer; }
+    button:disabled { background: #90a4ae; cursor: not-allowed; }
+    .note { font-size: 0.75rem; color: #78909c; margin-top: 4px; }
+    .hidden { display: none; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>役職者マネジメント業務ログ</h2>
+    <form id="logForm">
+      
+      <!-- 対象日 -->
+      <div class="form-group">
+        <label>対象日</label>
+        <input type="date" id="targetDate" required>
+      </div>
+
+      <!-- IDコード（12名体制） -->
+      <div class="form-group">
+        <label>担当IDコード</label>
+        <select id="idCode" onchange="switchTasks(this.value)" required>
+          <option value="">選択してください</option>
+          <option value="M-01">M-01</option>
+          <option value="M-02">M-02</option>
+          <option value="M-03">M-03</option>
+          <option value="M-04">M-04</option>
+          <option value="M-05">M-05</option>
+          <option value="M-06">M-06</option>
+          <option value="M-07">M-07</option>
+          <option value="M-08">M-08</option>
+          <option value="M-09">M-09</option>
+          <option value="M-10">M-10</option>
+          <option value="M-11">M-11</option>
+          <option value="M-12">M-12</option>
+        </select>
+        <div class="note">※事前付与された個別コードを選択してください</div>
+      </div>
+
+      <!-- 臨床単位数 -->
+      <div class="form-group">
+        <label>本日の臨床単位数（0〜25）</label>
+        <input type="number" id="units" min="0" max="25" placeholder="0" required>
+      </div>
+
+      <!-- 業務カテゴリー別チェック（IDに応じて自動切替） -->
+      <div id="taskSection" class="form-group hidden">
+        <label>本日実施したマネジメント業務</label>
+        <div id="taskList" class="checkbox-group"></div>
+      </div>
+
+      <!-- 特記事項 -->
+      <div class="form-group">
+        <label>特記事項・成果（任意）</label>
+        <textarea id="notes" rows="2" placeholder="※患者名等の個人情報は記入しないでください"></textarea>
+      </div>
+
+      <button type="submit" id="submitBtn">送信する</button>
+    </form>
+  </div>
+
+  <script>
+    // ★ここに取得したGASのウェブアプリURLを貼り付けます
+    const GAS_API_URL = "https://script.google.com/macros/s/AKfycbzUxUejWfTweNhor3hZJ7ybFoKmOtobpeOkUTxKWovnn4VF7mrkYFprtALMAg744rYjpA/exec";
+
+    // 本日の日付を自動初期セット
+    function initDate() {
+      const today = new Date();
+      const yyyy = today.getFullYear();
+      const mm = ("0" + (today.getMonth() + 1)).slice(-2);
+      const dd = ("0" + today.getDate()).slice(-2);
+      document.getElementById("targetDate").value = `${yyyy}-${mm}-${dd}`;
+    }
+    window.onload = initDate;
+
+    // 役割別業務マスター定義
+    const taskMasters = {
+      // 統括・課長補佐クラス（M-01: リハ部長, M-02: 急性期・地ケア・訪問統括, M-03: 回リハ統括）
+      exec: [
+        "【収支】新規患者マッチング・病床管理・受入調整",
+        "【組織】組織DX推進・業務自動化・運用改善",
+        "【労務】全体シフト管理・労務調整・リーダー面談",
+        "【会議】病床管理会議・合同運営会議・役員協議",
+        "【連携】他部門長・看護師長等との多職種協議",
+        "【安全】医療安全・院内委員会関連活動"
+      ],
+      // 回リハ病棟（M-04: 係長A, M-05: 係長B, M-08: 主任A, M-09: 主任B）
+      rehab_ward: [
+        "【基準】実績指数・予測FIM・除外患者管理（42死守）",
+        "【連携】病棟師長・看護合同マネジメント・退院調整",
+        "【ロス防】朝の18単位差配・急変枠振替・ロス回避対応",
+        "【監査】総合実施計画書・カルテ記載点検・算定管理",
+        "【多職種】医師回診同行・ケースカンファレンス司会",
+        "【育成】若手FIM指導・症例検討・面談実施"
+      ],
+      // 急性期病棟（M-06: 係長C, M-10: 主任C）
+      acute_ward: [
+        "【多職種】早期離床リスク協議・医師回診同行・カンファ",
+        "【ロス防】病棟内での急な単位調整・代行手配",
+        "【監査】総合実施計画書点検・医師説明タイミング調整",
+        "【教育】実習生統括・新入職バイザー指導",
+        "【チーム】専門チーム医療活動（NST、排尿ケア等）参画"
+      ],
+      // 地域包括ケア病棟（M-07: 係長D, M-11: 主任D, M-12: 主任E）
+      community_ward: [
+        "【連携】入退院支援・在宅復帰調整・ケアマネ/MSW連携",
+        "【事業】訪問リハビリ枠調整・実務実施",
+        "【ロス防】病棟内単位マネジメント・介入困難差配",
+        "【監査】計画書点検・レセプト確認・初日算定管理",
+        "【育成】スタッフ目標管理面談・臨床指導"
+      ]
+    };
+
+    function switchTasks(code) {
+      const section = document.getElementById("taskSection");
+      const list = document.getElementById("taskList");
+      list.innerHTML = "";
+
+      if (!code) {
+        section.classList.add("hidden");
+        return;
+      }
+
+      let category = "";
+      if (code === "M-01" || code === "M-02" || code === "M-03") {
+        category = "exec";
+      } else if (code === "M-04" || code === "M-05" || code === "M-08" || code === "M-09") {
+        category = "rehab_ward";
+      } else if (code === "M-06" || code === "M-10") {
+        category = "acute_ward";
+      } else if (code === "M-07" || code === "M-11" || code === "M-12") {
+        category = "community_ward";
+      }
+
+      const items = taskMasters[category] || [];
+
+      items.forEach(task => {
+        const lbl = document.createElement("label");
+        const chk = document.createElement("input");
+        chk.type = "checkbox";
+        chk.name = "tasks";
+        chk.value = task;
+        lbl.appendChild(chk);
+        lbl.appendChild(document.createTextNode(task));
+        list.appendChild(lbl);
+      });
+
+      section.classList.remove("hidden");
+    }
+
+    // 送信ハンドラ
+    document.getElementById("logForm").addEventListener("submit", function(e) {
+      e.preventDefault();
+      const btn = document.getElementById("submitBtn");
+      btn.disabled = true;
+      btn.innerText = "送信中...";
+
+      const selected = Array.from(document.querySelectorAll('input[name="tasks"]:checked')).map(el => el.value);
+
+      const payload = {
+        date: document.getElementById("targetDate").value,
+        code: document.getElementById("idCode").value,
+        units: document.getElementById("units").value,
+        tasks: selected,
+        notes: document.getElementById("notes").value
+      };
+
+      fetch(GAS_API_URL, {
+        method: "POST",
+        mode: "no-cors",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      })
+      .then(() => {
+        alert("送信完了しました。お疲れ様でした。");
+        document.getElementById("logForm").reset();
+        initDate();
+        document.getElementById("taskSection").classList.add("hidden");
+        btn.disabled = false;
+        btn.innerText = "送信する";
+      })
+      .catch(err => {
+        alert("送信エラー: " + err);
+        btn.disabled = false;
+        btn.innerText = "送信する";
+      });
+    });
+  </script>
+</body>
+</html>
